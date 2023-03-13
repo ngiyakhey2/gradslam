@@ -147,7 +147,7 @@ class ICL(data.Dataset):
         self.height = height
         self.width = width
         self.height_downsample_ratio = float(height) / 480
-        self.width_downsample_ratio = float(width) / 640
+        self.width_downsample_ratio = float(width) / 480
         self.channels_first = channels_first
         self.normalize_color = normalize_color
 
@@ -291,7 +291,7 @@ class ICL(data.Dataset):
                 posesfiles.append(posesfile)
 
         # Get a list of all color, depth, pose, label and intrinsics files.
-        colorfiles, depthfiles, posemetas, framenames = [], [], [], []
+        colorfiles, depthfiles, conceptfiles, posemetas, framenames = [], [], [], [], []
         idx = np.arange(seqlen) * (dilation + 1)
         for file_num, associationsfile in enumerate(associationsfiles):
             parentdir = os.path.dirname(associationsfile)
@@ -301,7 +301,7 @@ class ICL(data.Dataset):
                 if trajectory_name not in trajectories:
                     continue
 
-            traj_colorfiles, traj_depthfiles = [], []
+            traj_colorfiles, traj_depthfiles, traj_conceptfiles = [], [], []
             traj_poselinenums, traj_framenames = [], []
             with open(associationsfile, "r") as f:
                 lines = f.readlines()
@@ -334,6 +334,10 @@ class ICL(data.Dataset):
                     os.path.normpath(os.path.join(parentdir, line[1]))
                 )
 
+                traj_conceptfiles.append(
+                    os.path.normpath(os.path.join(parentdir, "nps", line[3].split("/")[-1].replace(".png", ".pt")))
+                )
+
                 if self.load_poses:
                     if line_num * 4 > len_posesfile:
                         msg = '{0}th pose should start from line {1} of file "{2}", but said file has only {3} lines.'
@@ -358,6 +362,7 @@ class ICL(data.Dataset):
                 inds = start_ind + idx
                 colorfiles.append([traj_colorfiles[i] for i in inds])
                 depthfiles.append([traj_depthfiles[i] for i in inds])
+                conceptfiles.append([traj_conceptfiles[i] for i in inds])
                 framenames.append(", ".join([traj_framenames[i] for i in inds]))
                 if self.load_poses:
                     posemetas.append(
@@ -372,6 +377,7 @@ class ICL(data.Dataset):
         # Class members to store the list of valid filepaths.
         self.colorfiles = colorfiles
         self.depthfiles = depthfiles
+        self.conceptfiles = conceptfiles
         self.posemetas = posemetas
         self.framenames = framenames
 
@@ -417,18 +423,27 @@ class ICL(data.Dataset):
         # Read in the color, depth, pose, label and intrinstics info.
         color_seq_path = self.colorfiles[idx]
         depth_seq_path = self.depthfiles[idx]
+        concept_seq_path = self.conceptfiles[idx]
         pose_seq_meta = self.posemetas[idx] if self.load_poses else None
         framename = self.framenames[idx]
 
-        color_seq, depth_seq, pose_seq, label_seq = [], [], [], []
+        color_seq, depth_seq, concept_seq, pose_seq, label_seq = [], [], [], [], []
         for i in range(self.seqlen):
             color = np.asarray(imageio.imread(color_seq_path[i]), dtype=float)
+            color = color[:480, :480]
             color = self._preprocess_color(color)
             color = torch.from_numpy(color)
             color_seq.append(color)
 
+            concept = torch.load(concept_seq_path[i])
+            concept = concept[::4, ::4]
+            # concept = self._preprocess_concept(concept)
+            # concept = torch.from_numpy(concept)
+            concept_seq.append(concept)
+
             if self.return_depth:
                 depth = np.asarray(imageio.imread(depth_seq_path[i]), dtype=np.int64)
+                depth = depth[:480, :480]
                 depth = self._preprocess_depth(depth)
                 depth = torch.from_numpy(depth)
                 depth_seq.append(depth)
@@ -441,9 +456,14 @@ class ICL(data.Dataset):
         color_seq = torch.stack(color_seq, 0).float()
         output.append(color_seq)
 
+        
+
         if self.return_depth:
             depth_seq = torch.stack(depth_seq, 0).float()
             output.append(depth_seq)
+
+        concept_seq = torch.stack(concept_seq, 0).float()
+        output.append(concept_seq)
 
         if self.return_intrinsics:
             intrinsics = self.intrinsics
@@ -511,6 +531,28 @@ class ICL(data.Dataset):
         if self.channels_first:
             depth = datautils.channels_first(depth)
         return depth / self.scaling_factor
+
+    def _preprocess_concept(self, depth: np.ndarray):
+        r"""Preprocesses the depth image by resizing, adding channel dimension, and scaling values to meters. Optionally
+        converts depth from channels last :math:`(H, W, 1)` to channels first :math:`(1, H, W)` representation.
+
+        Args:
+            depth (np.ndarray): Raw depth image
+
+        Returns:
+            np.ndarray: Preprocessed depth
+
+        Shape:
+            - depth: :math:`(H_\text{old}, W_\text{old})`
+            - Output: :math:`(H, W, 1)` if `self.channels_first == False`, else :math:`(1, H, W)`.
+        """
+        depth = cv2.resize(
+            depth.astype(float),
+            (self.width, self.height),
+            interpolation = cv2.INTER_AREA,
+        )
+
+        return depth 
 
     def _preprocess_poses(self, poses: torch.Tensor):
         r"""Preprocesses the poses by setting first pose in a sequence to identity and computing the relative

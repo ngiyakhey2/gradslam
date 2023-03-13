@@ -654,12 +654,14 @@ def fuse_with_map(
     vertex_maps = rgbdimages.global_vertex_map
     normal_maps = rgbdimages.global_normal_map
     rgb_image = rgbdimages.rgb_image
+    concept_image = rgbdimages.concept_image
     alpha_image = get_alpha(rgbdimages.vertex_map, dim=4, keepdim=True, sigma=sigma)
 
     if pointclouds.has_points and pc2im_bnhw.shape[0] != 0:
         frame_points = torch.zeros_like(pointclouds.points_padded)
         frame_normals = torch.zeros_like(pointclouds.normals_padded)
         frame_colors = torch.zeros_like(pointclouds.colors_padded)
+        frame_concepts = torch.zeros_like(pointclouds.concepts_padded)
         frame_alphas = torch.zeros_like(pointclouds.features_padded)
 
         frame_points[pc2im_bnhw[:, 0], pc2im_bnhw[:, 1]] = vertex_maps[
@@ -669,6 +671,9 @@ def fuse_with_map(
             pc2im_bnhw[:, 0], 0, pc2im_bnhw[:, 2], pc2im_bnhw[:, 3]
         ]
         frame_colors[pc2im_bnhw[:, 0], pc2im_bnhw[:, 1]] = rgb_image[
+            pc2im_bnhw[:, 0], 0, pc2im_bnhw[:, 2], pc2im_bnhw[:, 3]
+        ]
+        frame_concepts[pc2im_bnhw[:, 0], pc2im_bnhw[:, 1]] = concept_image[
             pc2im_bnhw[:, 0], 0, pc2im_bnhw[:, 2], pc2im_bnhw[:, 3]
         ]
         frame_alphas[pc2im_bnhw[:, 0], pc2im_bnhw[:, 1]] = alpha_image[
@@ -688,6 +693,9 @@ def fuse_with_map(
         updated_colors = (map_ccounts * pointclouds.colors_padded) + (
             frame_alphas * frame_colors
         )
+        updated_concepts = (map_ccounts * pointclouds.concepts_padded) + (
+            frame_alphas * frame_concepts
+        )
 
         # Merge corresponding points
         inv_updated_ccounts = 1 / torch.where(
@@ -696,6 +704,7 @@ def fuse_with_map(
         pointclouds.points_padded = updated_points * inv_updated_ccounts
         pointclouds.normals_padded = updated_normals * inv_updated_ccounts
         pointclouds.colors_padded = updated_colors * inv_updated_ccounts
+        pointclouds.concepts_padded = updated_concepts * inv_updated_ccounts
         pointclouds.features_padded = updated_ccounts
 
     # Append points (from live frame) that did not have correspondences (from global map)
@@ -710,10 +719,11 @@ def fuse_with_map(
     new_points = [vertex_maps[b][new_mask[b]] for b in range(B)]
     new_normals = [normal_maps[b][new_mask[b]] for b in range(B)]
     new_colors = [rgb_image[b][new_mask[b]] for b in range(B)]
+    new_concepts = [concept_image[b][new_mask[b]] for b in range(B)]
     new_features = [alpha_image[b][new_mask[b]] for b in range(B)]
 
     new_pointclouds = Pointclouds(
-        points=new_points, normals=new_normals, colors=new_colors, features=new_features
+        points=new_points, normals=new_normals, colors=new_colors, concepts=new_concepts, features=new_features
     )
     if not inplace:
         pointclouds = pointclouds.clone()

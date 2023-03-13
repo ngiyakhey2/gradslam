@@ -55,6 +55,7 @@ class Pointclouds(object):
         "_points_padded",
         "_normals_padded",
         "_colors_padded",
+        "_concepts_padded",
         "_features_padded",
         "_nonpad_mask",
         "_num_points_per_pointcloud",
@@ -65,6 +66,7 @@ class Pointclouds(object):
         points: Union[List[torch.Tensor], torch.Tensor, None] = None,
         normals: Union[List[torch.Tensor], torch.Tensor, None] = None,
         colors: Union[List[torch.Tensor], torch.Tensor, None] = None,
+        concepts: Union[List[torch.Tensor], torch.Tensor, None] = None,
         features: Union[List[torch.Tensor], torch.Tensor, None] = None,
         device: Union[torch.device, str, None] = None,
     ):
@@ -80,6 +82,9 @@ class Pointclouds(object):
         if not (colors is None or isinstance(colors, type(points))):
             msg = "Expected colors to be of same type as points (%r); got %r"
             raise TypeError(msg % (type(points), type(colors)))
+        if not (concepts is None or isinstance(concepts, type(points))):
+            msg = "Expected concepts to be of same type as points (%r); got %r"
+            raise TypeError(msg % (type(points), type(concepts)))
         if not (features is None or isinstance(features, type(points))):
             msg = "Expected features to be of same type as points (%r); got %r"
             raise TypeError(msg % (type(points), type(features)))
@@ -90,17 +95,20 @@ class Pointclouds(object):
         self._points_list = None
         self._normals_list = None
         self._colors_list = None
+        self._concepts_list = None
         self._features_list = None
 
         self._points_padded = None
         self._normals_padded = None
         self._colors_padded = None
+        self._concepts_padded = None
         self._features_padded = None
         self._nonpad_mask = None
 
         self._has_points = None
         self._has_normals = None
         self._has_colors = None
+        self._has_concepts = None
         self._has_features = None
 
         self._num_points_per_pointcloud = None
@@ -158,6 +166,9 @@ class Pointclouds(object):
             self._colors_list = (
                 None if colors is None else [c.to(self.device) for c in colors]
             )
+            self._concepts_list = (
+                None if concepts is None else [c.to(self.device) for c in concepts]
+            )
             self._features_list = (
                 None if features is None else [f.to(self.device) for f in features]
             )
@@ -209,6 +220,7 @@ class Pointclouds(object):
             self._points_padded = points.to(self.device)
             self._normals_padded = None if normals is None else normals.to(self.device)
             self._colors_padded = None if colors is None else colors.to(self.device)
+            self._concepts_padded = None if concepts is None else concepts.to(self.device)
             self._features_padded = (
                 None if features is None else features.to(self.device)
             )
@@ -254,6 +266,7 @@ class Pointclouds(object):
             points = self.points_list[index]
             normals = self.normals_list[index] if self.has_normals else None
             colors = self.colors_list[index] if self.has_colors else None
+            concepts = self.concepts_list[index] if self.has_concepts else None
             features = self.features_list[index] if self.has_features else None
         elif isinstance(index, list):
             points = [self.points_list[i] for i in index]
@@ -261,6 +274,7 @@ class Pointclouds(object):
                 [self.normals_list[i] for i in index] if self.has_normals else None
             )
             colors = [self.colors_list[i] for i in index] if self.has_colors else None
+            concepts = [self.concepts_list[i] for i in index] if self.has_concepts else None
             features = (
                 [self.features_list[i] for i in index] if self.has_features else None
             )
@@ -276,6 +290,7 @@ class Pointclouds(object):
                 [self.normals_list[i] for i in index] if self.has_normals else None
             )
             colors = [self.colors_list[i] for i in index] if self.has_colors else None
+            concepts = [self.concepts_list[i] for i in index] if self.has_concepts else None
             features = (
                 [self.features_list[i] for i in index] if self.has_features else None
             )
@@ -284,15 +299,16 @@ class Pointclouds(object):
 
         if isinstance(points, list):
             return Pointclouds(
-                points=points, normals=normals, colors=colors, features=features
+                points=points, normals=normals, colors=colors, concepts=concepts, features=features
             )
         elif torch.is_tensor(points):
             points = [points]
             normals = None if normals is None else [normals]
             colors = None if colors is None else [colors]
+            concepts = None if concepts is None else [concepts]
             features = None if features is None else [features]
             return Pointclouds(
-                points=points, normals=normals, colors=colors, features=features
+                points=points, normals=normals, colors=colors, concepts=concepts, features=features
             )
         else:
             raise ValueError("points not defined correctly")
@@ -653,6 +669,19 @@ class Pointclouds(object):
         return self._has_colors
 
     @property
+    def has_concepts(self):
+        r"""Determines whether pointclouds have colors or not
+
+        Returns:
+            bool
+        """
+        if self._has_concepts is None:
+            self._has_concepts = (
+                self._concepts_list is not None or self._concepts_padded is not None
+            )
+        return self._has_concepts
+
+    @property
     def has_features(self):
         r"""Determines whether pointclouds have features or not
 
@@ -722,6 +751,20 @@ class Pointclouds(object):
         return self._colors_list
 
     @property
+    def concepts_list(self):
+        r"""Gets the list representation of the point colors.
+
+        Returns:
+            list of torch.Tensor: list of :math:`B` tensors of colors of shape :math:`(N_b, 3)`.
+        """
+        if self._concepts_list is None and self._concepts_padded is not None:
+            self._concepts_list = [
+                c[0, : self._num_points_per_pointcloud[b]]
+                for b, c in enumerate(self._concepts_padded.split([1] * self._B, 0))
+            ]
+        return self._concepts_list
+
+    @property
     def features_list(self):
         r"""Gets the list representation of the point features.
 
@@ -773,6 +816,19 @@ class Pointclouds(object):
         """
         self._compute_padded()
         return self._colors_padded
+
+    @property
+    def concepts_padded(self):
+        r"""Gets the padded representation of the colors.
+
+        Returns:
+            torch.Tensor: tensor representation of colors with zero padding as required
+
+        Shape:
+            - Output: :math:`(B, max(N_b), 3)`
+        """
+        self._compute_padded()
+        return self._concepts_padded
 
     @property
     def features_padded(self):
@@ -863,6 +919,20 @@ class Pointclouds(object):
         self._colors_list = [v.clone().to(self.device) for v in value]
         self._noramls_padded = None
 
+    @concepts_list.setter
+    def concepts_list(self, value: List[torch.Tensor]):
+        r"""Updates `colors_list` representation.
+        .. note:: The number of pointclouds and the number of points per pointcloud can not change.
+
+        Args:
+            value (list of torch.Tensor): list of :math:`B` tensors of points of shape :math:`(N_b, 3)`.
+                Shape of tensors in `value` and `pointclouds.points_list` must match.
+
+        """
+        self._assert_set_list(value)
+        self._concepts_list = [v.clone().to(self.device) for v in value]
+        self._noramls_padded = None
+
     @features_list.setter
     def features_list(self, value: List[torch.Tensor]):
         r"""Updates `features_list` representation.
@@ -928,6 +998,23 @@ class Pointclouds(object):
         self._colors_padded = value.clone().to(self.device)
         self._colors_list = None
 
+    @concepts_padded.setter
+    def concepts_padded(self, value: torch.Tensor):
+        r"""Updates `colors_padded` representation.
+        .. note:: The number of pointclouds and the number of points per pointcloud can not change
+            (can not change the shape or padding of `colors_padded`).
+
+        Args:
+            value (torch.Tensor): tensor representation of (zero padded) colors with the same shape and number of
+                points per pointcloud as `self.points_padded`
+
+        Shape:
+            - value: :math:`(B, max(N_b), 1408)`
+        """
+        self._assert_set_padded(value, first_2_dims_only=True)
+        self._concepts_padded = value.clone().to(self.device)
+        self._concepts_list = None
+
     @features_padded.setter
     def features_padded(self, value: torch.Tensor):
         r"""Updates `features_padded` representation.
@@ -983,6 +1070,16 @@ class Pointclouds(object):
                 equisized=self.equisized,
             )
         )
+        self._concepts_padded = (
+            None
+            if self._concepts_list is None
+            else structutils.list_to_padded(
+                self._concepts_list,
+                (self._N, 1408),
+                pad_value=0.0,
+                equisized=self.equisized,
+            )
+        )
         self._features_padded = (
             None
             if self._features_list is None
@@ -1027,6 +1124,9 @@ class Pointclouds(object):
             new_colors = (
                 None if self._colors_padded is None else self._colors_padded.clone()
             )
+            new_concepts = (
+                None if self._concepts_padded is None else self._concepts_padded.clone()
+            )
             new_features = (
                 None if self._features_padded is None else self._features_padded.clone()
             )
@@ -1056,6 +1156,8 @@ class Pointclouds(object):
             other._normals_list = [n.detach() for n in other._normals_list]
         if other._colors_list is not None:
             other._colors_list = [c.detach() for c in other._colors_list]
+        if other._concepts_list is not None:
+            other._concepts_list = [c.detach() for c in other._concepts_list]
         if other._features_list is not None:
             other._features_list = [f.detach() for f in other._features_list]
         for k in self._INTERNAL_TENSORS:
@@ -1090,6 +1192,8 @@ class Pointclouds(object):
                 other._normals_list = [n.to(device) for n in other._normals_list]
             if other._colors_list is not None:
                 other._colors_list = [c.to(device) for c in other._colors_list]
+            if other._concepts_list is not None:
+                other._concepts_list = [c.to(device) for c in other._concepts_list]
             if other._features_list is not None:
                 other._features_list = [f.to(device) for f in other._features_list]
             for k in self._INTERNAL_TENSORS:
@@ -1153,6 +1257,10 @@ class Pointclouds(object):
                     self._colors_list = [
                         c.clone().to(self.device) for c in pointclouds.colors_list
                     ]
+                if pointclouds.has_concepts:
+                    self._concepts_list = [
+                        c.clone().to(self.device) for c in pointclouds.concepts_list
+                    ]
                 if pointclouds.has_features:
                     self._features_list = [
                         f.clone().to(self.device) for f in pointclouds.features_list
@@ -1160,6 +1268,7 @@ class Pointclouds(object):
                 self._has_points = pointclouds._has_points
                 self._has_normals = pointclouds._has_normals
                 self._has_colors = pointclouds._has_colors
+                self._has_concepts = pointclouds._has_concepts
                 self._has_features = pointclouds._has_features
                 self._B = pointclouds._B
                 self._N = pointclouds._N
@@ -1186,6 +1295,12 @@ class Pointclouds(object):
             raise ValueError(
                 "pointclouds to append and to be appended must either both have or not have colors: ({0} != {1})".format(
                     pointclouds.has_colors, self.has_colors
+                )
+            )
+        if self.has_concepts != pointclouds.has_concepts:
+            raise ValueError(
+                "pointclouds to append and to be appended must either both have or not have colors: ({0} != {1})".format(
+                    pointclouds.has_concepts, self.has_concepts
                 )
             )
         if self.has_features != pointclouds.has_features:
@@ -1219,6 +1334,13 @@ class Pointclouds(object):
                 for b in range(self._B)
             ]
             self._colors_padded = None
+
+        if self.has_concepts:
+            self._concepts_list = [
+                torch.cat([self.concepts_list[b], pointclouds.concepts_list[b]], 0)
+                for b in range(self._B)
+            ]
+            self._concepts_padded = None
 
         if self.has_features:
             self._features_list = [
@@ -1338,6 +1460,101 @@ class Pointclouds(object):
             if subsample:
                 torch_colors = torch_colors[point_inds]
             # if colors > 1, assume 255 range
+            if (torch_colors.max() < 1.1).item():
+                torch_colors = torch_colors * 255
+            torch_colors = torch.clamp(torch_colors, min=0.0, max=255.0)
+            numpy_colors = torch_colors.detach().cpu().numpy().astype("uint8")
+            marker_dict["color"] = numpy_colors
+
+        scatter3d = go.Scatter3d(
+            x=numpy_points[..., 0],
+            y=numpy_points[..., 1],
+            z=numpy_points[..., 2],
+            mode="markers",
+            marker=marker_dict,
+        )
+
+        if not as_figure:
+            return scatter3d
+
+        fig = go.Figure(data=[scatter3d])
+        fig.update_layout(
+            showlegend=False,
+            scene=dict(
+                xaxis=dict(
+                    showticklabels=False,
+                    showgrid=False,
+                    zeroline=False,
+                    visible=False,
+                ),
+                yaxis=dict(
+                    showticklabels=False,
+                    showgrid=False,
+                    zeroline=False,
+                    visible=False,
+                ),
+                zaxis=dict(
+                    showticklabels=False,
+                    showgrid=False,
+                    zeroline=False,
+                    visible=False,
+                ),
+            ),
+        )
+
+        return fig
+
+    def plotly_concept(
+        self,
+        index: int,
+        include_colors: bool = True,
+        max_num_points: Optional[int] = 200000,
+        as_figure: bool = True,
+        point_size: int = 2,
+    ):
+        r"""Converts `index`-th pointcloud to either a `plotly.graph_objects.Figure` or a
+        `plotly.graph_objects.Scatter3d` object (for visualization).
+
+        Args:
+            index (int): Index of which pointcloud (from the batch of pointclouds) to convert to plotly
+                representation.
+            include_colors (bool): If True, will include point colors in the returned object. Default: True
+            max_num_points (int): Maximum number of points to include in the returned object. If None,
+                will not set a max size (will not downsample). Default: 200000
+            as_figure (bool): If True, returns a `plotly.graph_objects.Figure` object which can easily
+                be visualized by calling `.show()` on. Otherwise, returns a
+                `plotly.graph_objects.Scatter3d` object. Default: True
+            point_size (int): Point size radius (for visualization). Default: 2
+
+        Returns:
+            plotly.graph_objects.Figure or plotly.graph_objects.Scatter3d: If `as_figure` is True, will return
+            `plotly.graph_objects.Figure` object from the `index`-th pointcloud. Else,
+            returns `plotly.graph_objects.Scatter3d` object from the `index`-th pointcloud.
+        """
+        if not isinstance(index, int):
+            raise TypeError("Index should be int, but was {}.".format(type(index)))
+        num_points = self.num_points_per_pointcloud[index]
+        torch_points = self.points_list[index]
+        subsample = max_num_points is not None and max_num_points < num_points
+        if subsample:
+            perm = torch.randperm(num_points)
+            point_inds = perm[:max_num_points]
+            torch_points = torch_points[point_inds]
+        numpy_points = torch_points.detach().cpu().numpy()
+
+        marker_dict = {"size": point_size}
+
+        if self.has_concepts and include_colors:
+            torch_colors = self.concepts_list[index]
+            if subsample:
+                torch_colors = torch_colors[point_inds]
+            # if colors > 1, assume 255 range
+            from sklearn.decomposition import PCA
+            pca = PCA(n_components=3)
+            
+            torch_colors = torch_colors.reshape((-1, 1408)).cpu().numpy()
+            torch_colors = torch.tensor(pca.fit_transform(torch_colors))
+
             if (torch_colors.max() < 1.1).item():
                 torch_colors = torch_colors * 255
             torch_colors = torch.clamp(torch_colors, min=0.0, max=255.0)

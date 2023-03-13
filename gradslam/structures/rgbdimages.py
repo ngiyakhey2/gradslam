@@ -55,6 +55,7 @@ class RGBDImages(object):
     _INTERNAL_TENSORS = [
         "_rgb_image",
         "_depth_image",
+        "_concept_image",
         "_intrinsics",
         "_poses",
         "_pixel_pos",
@@ -68,6 +69,7 @@ class RGBDImages(object):
         self,
         rgb_image: torch.Tensor,
         depth_image: torch.Tensor,
+        concept_image: torch.Tensor,
         intrinsics: torch.Tensor,
         poses: Optional[torch.Tensor] = None,
         channels_first: bool = False,
@@ -147,7 +149,7 @@ class RGBDImages(object):
             raise ValueError(msg.format(self._pixel_pos_shape, pixel_pos.shape))
 
         # assert device type
-        inputs = [rgb_image, depth_image, intrinsics, poses, pixel_pos]
+        inputs = [rgb_image, depth_image, concept_image, intrinsics, poses, pixel_pos]
         devices = [x.device for x in inputs if x is not None]
         if len(set(devices)) != 1:
             raise ValueError(
@@ -159,6 +161,7 @@ class RGBDImages(object):
         self._rgb_image = rgb_image if device is None else rgb_image.to(device)
         self.device = self._rgb_image.device
         self._depth_image = depth_image.to(self.device)
+        self._concept_image = concept_image.to(self.device)
         self._intrinsics = intrinsics.to(self.device)
         self._poses = poses.to(self.device) if poses is not None else None
         self._pixel_pos = pixel_pos.to(self.device) if pixel_pos is not None else None
@@ -218,15 +221,17 @@ class RGBDImages(object):
                     )
                 )
             new_depth = self._depth_image[_index_slices[0], _index_slices[1]]
+            new_concept = self._concept_image[_index_slices[0], _index_slices[1]]
             new_intrinsics = self._intrinsics[_index_slices[0], :]
             other = RGBDImages(
                 new_rgb,
                 new_depth,
+                new_concept,
                 new_intrinsics,
                 channels_first=self.channels_first,
             )
             for k in self._INTERNAL_TENSORS:
-                if k in ["_rgb_image", "_depth_image", "_intrinsics"]:
+                if k in ["_rgb_image", "_depth_image", "_concept_image", "_intrinsics"]:
                     continue
                 v = getattr(self, k)
                 if torch.is_tensor(v):
@@ -267,6 +272,18 @@ class RGBDImages(object):
             - Output: :math:`(B, L, H, W, 3)` if self.channels_first is False, else :math:`(B, L, 3, H, W)`
         """
         return self._rgb_image
+
+    @property
+    def concept_image(self):
+        r"""Gets the depth image
+
+        Returns:
+            torch.Tensor: tensor representation of `depth_image`
+
+        Shape:
+            - Output: :math:`(B, L, H, W, 1)` if self.channels_first is False, else :math:`(B, L, 1, H, W)`
+        """
+        return self._concept_image
 
     @property
     def depth_image(self):
@@ -410,6 +427,20 @@ class RGBDImages(object):
             self._assert_shape(value, self._rgb_image_shape)
         self._rgb_image = value
 
+    @concept_image.setter
+    def concept_image(self, value):
+        r"""Updates `rgb_image` of self.
+
+        Args:
+            value (torch.Tensor): New rgb image values
+
+        Shape:
+            - value: :math:`(B, L, H, W, 3)` if self.channels_first is False, else :math:`(B, L, 3, H, W)`
+        """
+        if value is not None:
+            self._assert_shape(value, self._concept_image_shape)
+        self._concept_image = value
+
     @depth_image.setter
     def depth_image(self, value):
         r"""Updates `depth_image` of self.
@@ -485,11 +516,12 @@ class RGBDImages(object):
         other = RGBDImages(
             rgb_image=self._rgb_image.clone(),
             depth_image=self._depth_image.clone(),
+            concept_image = self._concept_image.clone(),
             intrinsics=self._intrinsics.clone(),
             channels_first=self.channels_first,
         )
         for k in self._INTERNAL_TENSORS:
-            if k in ["_rgb_image", "_depth_image", "_intrinsics"]:
+            if k in ["_rgb_image", "_depth_image", "concept_image", "_intrinsics"]:
                 continue
             v = getattr(self, k)
             if torch.is_tensor(v):
@@ -583,6 +615,7 @@ class RGBDImages(object):
         ordering = (0, 1, 3, 4, 2)  # B L C H W -> B L H W C
         permute = RGBDImages._permute_if_not_None
         self._rgb_image = permute(self._rgb_image, ordering)
+        self._concept_image = permute(self._concept_image, ordering)
         self._depth_image = permute(self._depth_image, ordering)
         self._vertex_map = permute(self._vertex_map, ordering)
         self._global_vertex_map = permute(self._global_vertex_map, ordering)
@@ -591,6 +624,7 @@ class RGBDImages(object):
 
         self._channels_first = False
         self._rgb_image_shape = tuple(self._rgb_image.shape)
+        self._concept_image_shape = tuple(self._concept_image.shape)
         self._depth_image_shape = tuple(self._depth_image.shape)
         return self
 
